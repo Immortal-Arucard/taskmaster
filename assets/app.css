@@ -1,0 +1,56 @@
+:root{--bg:#000;--line:#3a3a3a;--sky:#4fc3ff;--text:#fff;--mute:#c8c8c8}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{color-scheme:dark}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:0 0 40px}
+.serif{font-family:"Cormorant Garamond",Georgia,"Times New Roman",serif}
+.skip{position:absolute;left:12px;top:-40px;z-index:30;background:#000;color:var(--sky);padding:8px 12px;border-radius:8px;border:1px solid var(--sky)}
+.skip:focus{top:12px}
+.app-header{position:sticky;top:0;z-index:20;align-self:stretch;width:100%;background:#000;border-bottom:1px solid var(--line)}
+.app-bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;max-width:980px;margin:0 auto;padding:10px 16px}
+.app-name{margin:0;flex:1 1 160px;min-width:0;display:flex;align-items:center;gap:10px}
+.app-name a{color:#fff;text-decoration:none;font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(22px,3vw,28px);font-weight:600;line-height:1.1;display:flex;align-items:center;gap:10px}
+.app-name img{width:32px;height:32px;border-radius:8px;flex:none}
+.account-slot{margin-left:auto;display:flex;align-items:center;min-width:0;max-width:min(52vw,16rem)}
+.account-slot a,.account-slot button{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;min-height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--sky);background:#000;color:var(--sky);text-decoration:none;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.account-slot a:hover,.account-slot button:hover{background:var(--sky);color:#000}
+.account-pending{display:inline-block;width:32px;height:32px;border-radius:50%;border:1px solid var(--line)}
+.account-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--sky);background:#000;color:var(--sky);font-size:11px;overflow:hidden}
+.account-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page{align-self:stretch;width:100%;max-width:760px;margin:0 auto;padding:28px 16px 0}
+.page h1{font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(40px,8vw,64px);font-weight:600;line-height:1.05;margin:8px 0 0;letter-spacing:.02em;color:#fff}
+.eyebrow{margin:18px 0 0;color:var(--sky);letter-spacing:.18em;text-transform:uppercase;font-size:12px}
+.lead{font-size:18px;line-height:1.6;color:#e8e8e8}
+.note{color:var(--mute);font-size:14px;line-height:1.45}
+.note a{color:var(--sky)}
+.flag{margin:16px 0 0;padding:12px;border:1px solid var(--sky);border-radius:12px;color:#fff;font-size:15px;line-height:1.45}
+.flag .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.take{display:inline-flex;align-items:center;justify-content:center;margin-top:8px;min-height:48px;padding:0 22px;border-radius:12px;border:1px solid var(--sky);text-decoration:none;font:inherit;font-weight:600;background:var(--sky);color:#000;cursor:pointer}
+.take:hover{filter:brightness(1.08)}
+.take:disabled{opacity:.6;cursor:not-allowed}
+.ghost{background:#000;color:var(--sky)}
+.google-btn{display:inline-flex;align-items:center;gap:10px;background:#fff;color:#1f1f1f;border-color:#dadce0}
+.google-btn svg{width:18px;height:18px;flex:none}
+.signin{margin-top:22px;display:grid;gap:12px;max-width:28rem}
+.signin label{font-size:14px;color:var(--mute)}
+.signin input{width:100%;min-height:48px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:#000;color:#fff;font:inherit;font-size:16px}
+.signin .take{margin-top:0;justify-self:start}
+.or{color:var(--mute);font-size:13px;letter-spacing:.12em;text-transform:uppercase;margin:4px 0}
+.taskmaster{margin-top:22px;min-width:0}
+.task-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;max-width:100%}
+.task-input{flex:1 1 12rem;min-width:0;min-height:48px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:#000;color:#fff;font:inherit;font-size:16px}
+.task-add{margin-top:0}
+.task-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.task-row{display:flex;align-items:center;gap:8px;min-width:0}
+.task-title{flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.4}
+.task-title.is-done{color:var(--mute);text-decoration:line-through}
+.task-check{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;flex:none}
+.task-check input{width:22px;height:22px;accent-color:#4fc3ff}
+.task-delete{appearance:none;flex:none;min-height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:#000;color:var(--sky);font:inherit;font-weight:600;cursor:pointer}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.app-footer{align-self:stretch;max-width:760px;width:100%;margin:40px auto 0;padding:16px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
+.app-footer nav{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px}
+.app-footer a{color:var(--sky);text-decoration:none;min-height:32px;display:inline-flex;align-items:center}
+.offline-pill{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mute);font-size:12px}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--sky);outline-offset:3px}

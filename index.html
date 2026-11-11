@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Taskmaster — The World Government, Inc.</title>
+<meta name="description" content="Taskmaster: a personal task list for your TWGI master account.">
+<link rel="canonical" href="https://taskmaster.theworldgovernmentincorporated.com/">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Taskmaster">
+<link rel="icon" href="/icons/favicon-48.png" type="image/png" sizes="48x48">
+<link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="app-header">
+  <div class="app-bar">
+    <p class="app-name"><a href="/"><img src="/icons/icon-192.png" alt="" width="32" height="32">Taskmaster</a><span class="offline-pill" id="offline-pill" hidden>Offline</span></p>
+    <div class="account-slot" data-account-slot></div>
+  </div>
+</header>
+<main class="page" id="main">
+  <p class="eyebrow">TWGI master account</p>
+  <h1>Taskmaster</h1>
+  <p class="lead">Your personal task list. Add a task, check it off, or delete it.</p>
+  <p class="note" id="who-note">Not signed in: this list is kept on this device. <a href="/login/">Sign in</a> with your TWGI master account to keep a list for your account.</p>
+  <div class="flag" id="import-slot" role="region" aria-label="Import tasks" hidden></div>
+  <div id="taskmaster-app" class="taskmaster"></div>
+  <p class="note">Tasks are saved on this device and work offline. Syncing between devices is coming later.</p>
+</main>
+<footer class="app-footer">
+  <p>Taskmaster is part of The World Government, Inc.</p>
+  <nav aria-label="Footer">
+    <a href="https://theworldgovernmentincorporated.com/">TWGI home</a>
+    <a href="https://theworldgovernmentincorporated.com/account/">Master account</a>
+    <a href="https://theworldgovernmentincorporated.com/privacy.html">Privacy</a>
+    <a href="https://theworldgovernmentincorporated.com/terms.html">Terms</a>
+  </nav>
+</footer>
+<script src="/assets/import.js"></script>
+<script src="/assets/taskmaster.js"></script>
+<script src="/assets/app.js"></script>
+<script src="/vendor/supabase.js"></script>
+<script src="/assets/auth.js"></script>
+</body>
+</html>
