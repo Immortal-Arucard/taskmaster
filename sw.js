@@ -1,5 +1,6 @@
 /* Taskmaster service worker. Bump CACHE on every release. */
-const CACHE = 'taskmaster-v2';
+const CACHE = 'taskmaster-v3';
+const APP_TITLE = 'Taskmaster';
 const ASSETS = [
   '/',
   '/index.html',
@@ -13,6 +14,10 @@ const ASSETS = [
   '/assets/import.js',
   '/assets/login.js',
   '/assets/taskmaster.js',
+  '/assets/task-time.js',
+  '/assets/push-core.js',
+  '/assets/push-ui.js',
+  '/assets/comments.js',
   '/vendor/supabase.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -75,4 +80,42 @@ self.addEventListener('fetch', (event) => {
       return network;
     })
   );
+});
+
+/* Push notifications (v3). The push service sends JSON:
+   { title, body, url, tag, kind }. Only same-origin paths are opened. */
+function safePath(value) {
+  return typeof value === 'string' && value.charAt(0) === '/' && value.charAt(1) !== '/' && value.charAt(1) !== '\\' ? value : '/';
+}
+
+self.addEventListener('push', function (event) {
+  var payload = {};
+  try { payload = event.data ? event.data.json() : {}; }
+  catch (err) { payload = { body: event.data ? event.data.text() : '' }; }
+  var title = String(payload.title || APP_TITLE).slice(0, 120);
+  var options = {
+    body: String(payload.body || '').slice(0, 240),
+    icon: '/icons/icon-192.png',
+    badge: '/icons/favicon-48.png',
+    tag: typeof payload.tag === 'string' ? payload.tag.slice(0, 64) : undefined,
+    renotify: !!payload.tag,
+    data: { url: safePath(payload.url), kind: String(payload.kind || '') }
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  var path = safePath(event.notification.data && event.notification.data.url);
+  var target = new URL(path, self.location.origin).href;
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (windows) {
+    var same = windows.filter(function (c) { return c.url && c.url.indexOf(self.location.origin) === 0; });
+    var exact = same.find(function (c) { return c.url === target; });
+    var client = exact || same[0];
+    if (client) {
+      if (!exact && client.postMessage) client.postMessage({ type: 'twgi-open', url: path });
+      return client.focus ? client.focus() : client;
+    }
+    return self.clients.openWindow ? self.clients.openWindow(target) : null;
+  }));
 });

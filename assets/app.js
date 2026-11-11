@@ -53,8 +53,32 @@
         }
       }
       offerImport();
+      openFromLink();
     });
   }
+
+  // Notification links: /?task=<id>[&comments=1] opens that task,
+  // /?plan=1 puts the cursor in "Add a task".
+  var linkHandled = false;
+  function openFromLink(href) {
+    var url;
+    try { url = new URL(href || window.location.href); } catch (err) { return; }
+    if (!href && linkHandled) return;
+    var taskId = url.searchParams.get('task');
+    if (taskId && window.TWGITaskmaster.openTask(taskId, url.searchParams.get('comments') === '1')) linkHandled = true;
+    if (url.searchParams.get('plan') === '1') {
+      var input = app.querySelector('.task-input');
+      if (input) input.focus();
+      linkHandled = true;
+    }
+  }
+  if ('serviceWorker' in navigator && navigator.serviceWorker.addEventListener) {
+    navigator.serviceWorker.addEventListener('message', function (event) {
+      var data = event.data || {};
+      if (data.type === 'twgi-open' && typeof data.url === 'string') openFromLink(new URL(data.url, window.location.origin).href);
+    });
+  }
+  openFromLink();
   if (window.TWGIAccount) bind();
   else document.addEventListener('twgi-account-api', bind);
 })();
