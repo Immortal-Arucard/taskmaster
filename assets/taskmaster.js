@@ -14,6 +14,10 @@
    Resume / Done record worked segments; a stopped, unfinished task shows a
    red Incomplete tag until it is resumed or completed.
 
+   Manual order (v4, assets/task-order.js): each task has `order` (0 = top)
+   and the stored array is kept in that order. Drag the handle (touch, pen or
+   mouse), use the arrow keys on it, or tap Up / Down.
+
    Change listeners: TWGITaskmaster.onChange(fn) gets (userId, tasks) after
    every save. assets/push-ui.js uses it to send the schedule fields to the
    push service, and assets/comments.js to keep comment threads titled.
@@ -34,6 +38,7 @@
   var requireUser = false;
   var changeListeners = [];
   var T = global.TWGITaskTime;
+  var O = global.TWGITaskOrder;
 
   var sync = {
     mode: 'local',
@@ -49,7 +54,7 @@
     try {
       var parsed = JSON.parse(global.localStorage.getItem(storageKey(id)) || '[]');
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter(function (task) {
+      var list = parsed.filter(function (task) {
         return task && typeof task.id === 'string' && typeof task.title === 'string';
       }).map(function (task) {
         var base = {
@@ -62,10 +67,12 @@
           dueAt: task.dueAt,
           durationMin: task.durationMin,
           segments: task.segments,
-          completedAt: task.completedAt
+          completedAt: task.completedAt,
+          order: task.order
         };
         return T ? T.clean(base) : base;
       });
+      return O ? O.normalize(list) : list;
     } catch (err) {
       return [];
     }
@@ -111,6 +118,7 @@
   function persist(tasks) {
     var id = activeKey();
     if (requireUser && !id) return Promise.resolve();
+    if (O) tasks = O.normalize(tasks);
     try {
       write(id, tasks);
     } catch (err) {
@@ -203,6 +211,7 @@
       var open = old.querySelector('details.task-details');
       var next = row(changed, { open: open && open.open });
       list.replaceChild(next, old);
+      refreshMoveButtons();
     }
     return changed;
   }
@@ -319,6 +328,149 @@
     return details;
   }
 
+  // ---- Manual order (v4) ----
+  function listNode() { return root && root.querySelector('[data-task-list]'); }
+
+  function refreshMoveButtons() {
+    var list = listNode();
+    if (!list) return;
+    var rows = Array.prototype.filter.call(list.children, function (n) { return n.classList && n.classList.contains('task-row'); });
+    rows.forEach(function (item, i) {
+      var up = item.querySelector('[data-move=up]');
+      var down = item.querySelector('[data-move=down]');
+      if (up) up.disabled = i === 0;
+      if (down) down.disabled = i === rows.length - 1;
+      var handle = item.querySelector('[data-drag-handle]');
+      if (handle) handle.setAttribute('aria-description', 'Position ' + (i + 1) + ' of ' + rows.length);
+    });
+  }
+
+  // Saves a new order and moves the existing rows to match (open panels stay open).
+  function applyOrder(tasks, movedId, focusSel) {
+    if (!O) return;
+    var ordered = O.normalize(tasks);
+    var at0 = O.indexOf(ordered, movedId);
+    var note = ordered[at0] ? 'Moved \u201c' + ordered[at0].title + '\u201d to position ' + (at0 + 1) + ' of ' + ordered.length + '.' : '';
+    // The save message arrives later; keep the move announcement visible.
+    persist(ordered).then(function () { if (note) say(note); });
+    var list = listNode();
+    if (list) {
+      ordered.forEach(function (task) {
+        var node = list.querySelector('[data-id="' + cssId(task.id) + '"]');
+        if (node) list.appendChild(node);
+      });
+    }
+    refreshMoveButtons();
+    if (note) say(note);
+    if (focusSel && list) {
+      var again = list.querySelector('[data-id="' + cssId(movedId) + '"] ' + focusSel);
+      if (again && !again.disabled && again.focus) again.focus();
+      else {
+        var handle = list.querySelector('[data-id="' + cssId(movedId) + '"] [data-drag-handle]');
+        if (handle && handle.focus) handle.focus();
+      }
+    }
+  }
+
+  function moveBy(id, delta, focusSel) {
+    if (!O) return;
+    applyOrder(O.moveBy(read(activeKey()), id, delta), id, focusSel);
+  }
+
+  // Touch, pen and mouse drag on the handle (Pointer Events).
+  function startDrag(item, handle, event) {
+    var list = listNode();
+    if (!list || !O) return;
+    var others = Array.prototype.filter.call(list.children, function (n) { return n !== item && n.classList && n.classList.contains('task-row'); });
+    var mids = others.map(function (n) { var r = n.getBoundingClientRect(); return r.top + r.height / 2; });
+    var startY = event.clientY;
+    var startScroll = global.scrollY || 0;
+    var slot = O.indexOf(read(activeKey()), item.getAttribute('data-id'));
+    var pointerId = event.pointerId;
+    item.classList.add('is-dragging');
+    list.classList.add('is-sorting');
+    if (handle.setPointerCapture && pointerId != null) { try { handle.setPointerCapture(pointerId); } catch (err) {} }
+
+    function mark() {
+      others.forEach(function (n, i) {
+        n.classList.toggle('drop-before', i === slot);
+        n.classList.toggle('drop-after', i === others.length - 1 && slot === others.length);
+      });
+    }
+    function onMove(e) {
+      if (pointerId != null && e.pointerId != null && e.pointerId !== pointerId) return;
+      if (e.cancelable) e.preventDefault();
+      var scrolled = (global.scrollY || 0) - startScroll;
+      item.style.transform = 'translateY(' + (e.clientY - startY + scrolled) + 'px)';
+      slot = O.slotFor(mids.map(function (m) { return m - scrolled; }), e.clientY);
+      mark();
+      // Edge scrolling on small screens.
+      var h = global.innerHeight || 0;
+      if (h && global.scrollBy) {
+        if (e.clientY < 70) global.scrollBy(0, -12);
+        else if (e.clientY > h - 70) global.scrollBy(0, 12);
+      }
+    }
+    function finish(commit) {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onCancel);
+      item.classList.remove('is-dragging');
+      list.classList.remove('is-sorting');
+      item.style.transform = '';
+      others.forEach(function (n) { n.classList.remove('drop-before'); n.classList.remove('drop-after'); });
+      if (commit) {
+        var id = item.getAttribute('data-id');
+        applyOrder(O.moveTo(read(activeKey()), id, slot), id, null);
+      }
+    }
+    function onUp() { finish(true); }
+    function onCancel() { finish(false); }
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onCancel);
+    mark();
+  }
+
+  function dragHandle(item, task) {
+    var handle = el('button', 'task-handle');
+    handle.type = 'button';
+    handle.setAttribute('data-drag-handle', 'true');
+    handle.setAttribute('aria-label', 'Reorder ' + task.title + '. Drag, or use the arrow keys.');
+    handle.title = 'Drag to reorder';
+    handle.innerHTML = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><circle cx="7" cy="5" r="1.6"/><circle cx="13" cy="5" r="1.6"/><circle cx="7" cy="10" r="1.6"/><circle cx="13" cy="10" r="1.6"/><circle cx="7" cy="15" r="1.6"/><circle cx="13" cy="15" r="1.6"/></svg>';
+    handle.addEventListener('pointerdown', function (e) {
+      if (e.button != null && e.button !== 0) return;
+      if (e.cancelable) e.preventDefault();
+      startDrag(item, handle, e);
+    });
+    handle.addEventListener('keydown', function (e) {
+      if (!O) return;
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveBy(task.id, -1, '[data-drag-handle]'); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); moveBy(task.id, 1, '[data-drag-handle]'); }
+      else if (e.key === 'Home') { e.preventDefault(); applyOrder(O.moveTo(read(activeKey()), task.id, 0), task.id, '[data-drag-handle]'); }
+      else if (e.key === 'End') { e.preventDefault(); applyOrder(O.moveTo(read(activeKey()), task.id, 1e9), task.id, '[data-drag-handle]'); }
+    });
+    return handle;
+  }
+
+  function moveButtons(task) {
+    var box = el('span', 'task-move');
+    var up = el('button', 'mini task-move-btn', '\u2191 Up');
+    up.type = 'button';
+    up.setAttribute('data-move', 'up');
+    up.setAttribute('aria-label', 'Move ' + task.title + ' up');
+    up.addEventListener('click', function () { moveBy(task.id, -1, '[data-move=up]'); });
+    var down = el('button', 'mini task-move-btn', '\u2193 Down');
+    down.type = 'button';
+    down.setAttribute('data-move', 'down');
+    down.setAttribute('aria-label', 'Move ' + task.title + ' down');
+    down.addEventListener('click', function () { moveBy(task.id, 1, '[data-move=down]'); });
+    box.appendChild(up);
+    box.appendChild(down);
+    return box;
+  }
+
   function row(task, options) {
     options = options || {};
     var st = T.status(task);
@@ -358,8 +510,10 @@
       var list = root.querySelector('[data-task-list]');
       var empty = root.querySelector('[data-task-empty]');
       if (empty) empty.hidden = !!(list && list.children.length);
+      refreshMoveButtons();
     });
 
+    top.appendChild(dragHandle(item, task));
     top.appendChild(label);
     top.appendChild(title);
     top.appendChild(remove);
@@ -387,6 +541,7 @@
       doneBtn.addEventListener('click', function () { update(task.id, function (e, now) { return T.complete(e, now); }); });
       actions.appendChild(doneBtn);
     }
+    actions.appendChild(moveButtons(task));
     item.appendChild(actions);
     item.appendChild(detailsPanel(task, options.open));
     return item;
@@ -406,6 +561,7 @@
     }
     var tasks = read(activeKey());
     tasks.forEach(function (task) { list.appendChild(row(task)); });
+    refreshMoveButtons();
     if (empty) {
       empty.hidden = tasks.length > 0;
       empty.textContent = 'No tasks yet.';
@@ -502,9 +658,11 @@
       newDue.value = '';
       Array.prototype.forEach.call(whenBox.querySelectorAll('input[type=number]'), function (n) { n.value = ''; });
       whenBox.open = false;
-      tasks.unshift(task);
+      if (O) tasks = O.addTop(tasks, task);
+      else tasks.unshift(task);
       input.value = '';
       list.insertBefore(row(task), list.firstChild);
+      refreshMoveButtons();
       empty.hidden = true;
       persist(tasks);
       input.focus();
@@ -572,6 +730,7 @@
     activeKey: function () { return activeKey(); },
     onChange: function (fn) { changeListeners.push(fn); },
     openTask: openTask,
+    moveBy: function (id, delta) { moveBy(id, delta, null); },
     update: function (id, fn) { return update(id, fn); }
   };
 

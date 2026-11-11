@@ -96,3 +96,15 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
 .opt input{width:20px;height:20px;accent-color:#4fc3ff;flex:none}
 .push-ios-hint{border-color:#ffd27a}
 @media (max-width:480px){.task-meta,.task-actions,.task-details{margin-left:0}}
+/* v4: manual order */
+.task-handle{appearance:none;flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;min-height:44px;padding:0;border:1px solid var(--line);border-radius:12px;background:#000;color:var(--mute);cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.task-handle svg{fill:currentColor}
+.task-handle:active{cursor:grabbing;color:var(--sky);border-color:var(--sky)}
+.task-move{display:inline-flex;gap:8px;margin-left:auto}
+.task-move-btn{padding:0 12px}
+.task-move-btn:disabled{opacity:.35;cursor:default}
+.task-list.is-sorting{-webkit-user-select:none;user-select:none}
+.task-row.is-dragging{position:relative;z-index:5;background:#0b0b0b;border:1px solid var(--sky);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.7)}
+.task-row.drop-before{box-shadow:inset 0 3px 0 var(--sky)}
+.task-row.drop-after{box-shadow:inset 0 -3px 0 var(--sky)}
+@media (max-width:480px){.task-move{margin-left:0}}
