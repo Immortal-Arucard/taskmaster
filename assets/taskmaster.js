@@ -18,6 +18,22 @@
    and the stored array is kept in that order. Drag the handle (touch, pen or
    mouse), use the arrow keys on it, or tap Up / Down.
 
+   Rename (v5): Edit name turns the title into a text field with Save and
+   Cancel. Enter saves, Escape cancels. An empty name is rejected and the
+   old name is kept. The new title is stored with the task (same localStorage
+   key, sync.push and onChange), so reminder text and comment threads pick
+   it up. The task's id, order, times, tags and comments stay the same.
+
+   Full-page task (v5): tapping a non-control part of a card opens #/task/<id>
+   (phone Back returns to the list at the same scroll). The page shows only
+   that task: no app header, list or other chrome. A small Back control sits
+   at the top. The first screen is a read-only stats display (name, status,
+   scheduled and actual times, duration, comment count; dashes for anything
+   not set; local times). Swipe, scroll or tap "Swipe for settings" to reach
+   the tools below (rename, start/stop/complete, plan, actual times, comments).
+   Taps on buttons, inputs, the drag handle, links or comments, and a drag to
+   reorder, do not open the page.
+
    Change listeners: TWGITaskmaster.onChange(fn) gets (userId, tasks) after
    every save. assets/push-ui.js uses it to send the schedule fields to the
    push service, and assets/comments.js to keep comment threads titled.
@@ -39,6 +55,11 @@
   var changeListeners = [];
   var T = global.TWGITaskTime;
   var O = global.TWGITaskOrder;
+  var listScroll = 0;
+  var pushedPage = false;
+  var closingPage = false;
+  var ignoreOpenClick = false;
+  var hashBound = false;
 
   var sync = {
     mode: 'local',
@@ -113,6 +134,8 @@
   function say(text) {
     var status = root && root.querySelector('[data-task-status]');
     if (status) status.textContent = text || '';
+    var pageStatus = document.querySelector('[data-task-page-status]');
+    if (pageStatus) pageStatus.textContent = text || '';
   }
 
   function persist(tasks) {
@@ -213,6 +236,7 @@
       list.replaceChild(next, old);
       refreshMoveButtons();
     }
+    refreshOpenPage(id);
     return changed;
   }
 
@@ -419,6 +443,7 @@
       list.classList.remove('is-sorting');
       item.style.transform = '';
       others.forEach(function (n) { n.classList.remove('drop-before'); n.classList.remove('drop-after'); });
+      suppressOpen();
       if (commit) {
         var id = item.getAttribute('data-id');
         applyOrder(O.moveTo(read(activeKey()), id, slot), id, null);
@@ -471,55 +496,278 @@
     return box;
   }
 
-  function row(task, options) {
-    options = options || {};
+
+  function suppressOpen() {
+    ignoreOpenClick = true;
+    setTimeout(function () { ignoreOpenClick = false; }, 500);
+  }
+
+  function isInteractive(node, rootEl) {
+    while (node && node !== rootEl) {
+      if (node.nodeType === 1) {
+        var tag = node.tagName;
+        if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'A' || tag === 'LABEL' || tag === 'SUMMARY') return true;
+        if (node.getAttribute && (node.getAttribute('data-drag-handle') || node.getAttribute('data-rename-input') || node.getAttribute('contenteditable') === 'true')) return true;
+      }
+      node = node.parentNode;
+    }
+    return false;
+  }
+
+  function currentScroll() { return global.pageYOffset || global.scrollY || 0; }
+
+  function restoreScroll() {
+    if (global.scrollTo) global.scrollTo(0, listScroll);
+    else global.scrollY = listScroll;
+  }
+
+  function idFromHash(hash) {
+    var m = String(hash || '').match(/^#\/task\/(.+)$/);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch (err) { return m[1]; }
+  }
+
+  function hashFor(id) { return '#/task/' + encodeURIComponent(id); }
+
+  function pageNode() { return document.querySelector('[data-task-page]'); }
+
+  function bindHash() {
+    if (hashBound) return;
+    hashBound = true;
+    global.addEventListener('hashchange', onHashChange);
+  }
+
+  function onHashChange() {
+    var id = idFromHash(global.location.hash);
+    if (id) {
+      if (closingPage) return;
+      showTaskPage(id);
+    } else {
+      closingPage = false;
+      pushedPage = false;
+      hideTaskPage();
+    }
+  }
+
+  function goToTask(id) {
+    listScroll = currentScroll();
+    closingPage = false;
+    if (idFromHash(global.location.hash) !== id) {
+      pushedPage = true;
+      global.location.hash = hashFor(id);
+    }
+    showTaskPage(id);
+  }
+
+  function goBackToList() {
+    closingPage = true;
+    hideTaskPage();
+    if (idFromHash(global.location.hash)) {
+      if (pushedPage && global.history && global.history.length > 1) {
+        pushedPage = false;
+        global.history.back();
+        return;
+      }
+      pushedPage = false;
+      if (global.history && global.history.replaceState) {
+        global.history.replaceState(null, '', (global.location.pathname || '/') + (global.location.search || ''));
+      } else global.location.hash = '';
+    }
+    closingPage = false;
+  }
+
+  function ensurePage() {
+    var page = pageNode();
+    if (page) return page;
+    page = el('div', 'task-page');
+    page.setAttribute('data-task-page', 'true');
+    page.setAttribute('role', 'dialog');
+    page.setAttribute('aria-modal', 'true');
+    page.setAttribute('aria-label', 'Task');
+    page.hidden = true;
+    document.body.appendChild(page);
+    return page;
+  }
+
+  function showTaskPage(id) {
+    var task = null;
+    read(activeKey()).forEach(function (t) { if (t.id === id) task = t; });
+    var page = ensurePage();
+    var y = page.hidden ? 0 : page.scrollTop;
+    var keepScroll = !page.hidden && page.getAttribute('data-open-id') === id;
+    clear(page);
+    page.hidden = false;
+    page.setAttribute('data-open-id', id);
+    document.documentElement.classList.add('is-task-page');
+    document.body.classList.add('is-task-page');
+    if (task) page.appendChild(buildTaskPage(task));
+    else {
+      page.appendChild(backButton());
+      page.appendChild(el('p', 'note', 'That task is not on this list.'));
+    }
+    page.scrollTop = keepScroll ? y : 0;
+    page.setAttribute('aria-label', task ? task.title : 'Task');
+  }
+
+  function hideTaskPage() {
+    var page = pageNode();
+    if (page) {
+      clear(page);
+      page.hidden = true;
+      page.removeAttribute('data-open-id');
+    }
+    document.documentElement.classList.remove('is-task-page');
+    document.body.classList.remove('is-task-page');
+    restoreScroll();
+  }
+
+  function refreshOpenPage(id) {
+    var page = pageNode();
+    if (!page || page.hidden) return;
+    var openId = page.getAttribute('data-open-id') || idFromHash(global.location.hash);
+    if (id && openId !== id) return;
+    if (openId) showTaskPage(openId);
+  }
+
+  function removeTask(id) {
+    var tasks = read(activeKey()).filter(function (entry) { return entry.id !== id; });
+    persist(tasks);
+    var list = root && root.querySelector('[data-task-list]');
+    var item = list && list.querySelector('[data-id="' + cssId(id) + '"]');
+    if (item && item.parentNode) item.parentNode.removeChild(item);
+    var empty = root && root.querySelector('[data-task-empty]');
+    if (empty && list) empty.hidden = !!list.children.length;
+    refreshMoveButtons();
+    if (idFromHash(global.location.hash) === id) goBackToList();
+  }
+
+  function backButton() {
+    var back = el('button', 'task-back', '\u2190 Back');
+    back.type = 'button';
+    back.setAttribute('data-task-back', 'true');
+    back.addEventListener('click', function () { goBackToList(); });
+    return back;
+  }
+
+  function statusLabel(task) {
     var st = T.status(task);
-    var item = document.createElement('li');
-    item.className = 'task-row' + (st === 'stopped' ? ' is-incomplete' : '');
-    item.setAttribute('data-id', task.id);
+    if (st === 'running') return 'In progress';
+    if (st === 'done') return 'Completed';
+    if (st === 'stopped') return 'Incomplete';
+    return 'Not started';
+  }
 
-    var top = el('div', 'task-top');
-    var label = document.createElement('label');
-    label.className = 'task-check';
-    var box = document.createElement('input');
-    box.type = 'checkbox';
-    box.checked = task.done;
-    var caption = document.createElement('span');
-    caption.className = 'visually-hidden';
-    caption.textContent = 'Done: ' + task.title;
-    label.appendChild(box);
-    label.appendChild(caption);
+  // Local date and time for the stats display. A dash means the value is not set.
+  function localWhen(value) {
+    var n = Date.parse(value || '');
+    if (!isFinite(n)) return '\u2014';
+    return new Date(n).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
 
+  function statRow(label, value, key) {
+    var row = el('div', 'task-stat-row');
+    row.appendChild(el('span', 'task-stat-label', label));
+    var v = el('span', 'task-stat-value', value);
+    v.setAttribute('data-stat', key);
+    row.appendChild(v);
+    return row;
+  }
+
+  function fillCommentCount(node, task) {
+    node.textContent = '\u2014';
+    if (!global.TWGITaskComments || !global.TWGITaskComments.countFor) return;
+    global.TWGITaskComments.countFor(activeKey(), task.id).then(function (n) {
+      if (!node.isConnected) return;
+      node.textContent = n == null ? '\u2014' : String(n);
+    }).catch(function () { if (node.isConnected) node.textContent = '\u2014'; });
+  }
+
+  function nameEditor(task) {
     var title = document.createElement('span');
     title.className = 'task-title' + (task.done ? ' is-done' : '');
     title.textContent = task.title;
+    title.setAttribute('data-task-title', 'true');
 
-    var remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'task-delete';
-    remove.textContent = 'Delete';
-    remove.setAttribute('aria-label', 'Delete ' + task.title);
-
-    box.addEventListener('change', function () {
-      update(task.id, function (entry, now) { return box.checked ? T.complete(entry, now) : T.reopen(entry, now); });
+    var nameBox = el('div', 'task-name');
+    var editName = el('button', 'mini task-rename-btn', 'Edit name');
+    editName.type = 'button';
+    editName.setAttribute('data-rename', 'true');
+    editName.setAttribute('aria-label', 'Edit name of ' + task.title);
+    editName.addEventListener('click', function () {
+      if (nameBox.querySelector('[data-rename-input]')) return;
+      title.hidden = true;
+      editName.hidden = true;
+      var input = document.createElement('input');
+      input.className = 'task-input task-rename-input';
+      input.type = 'text';
+      input.maxLength = MAX_TITLE;
+      input.autocomplete = 'off';
+      input.value = task.title;
+      input.setAttribute('data-rename-input', 'true');
+      input.setAttribute('aria-label', 'Task name');
+      var actions = el('div', 'task-rename-actions');
+      var save = el('button', 'mini', 'Save');
+      save.type = 'button';
+      save.setAttribute('data-rename-save', 'true');
+      var cancel = el('button', 'mini', 'Cancel');
+      cancel.type = 'button';
+      cancel.setAttribute('data-rename-cancel', 'true');
+      function closeEditor() {
+        if (input.parentNode) input.parentNode.removeChild(input);
+        if (actions.parentNode) actions.parentNode.removeChild(actions);
+        title.hidden = false;
+        editName.hidden = false;
+      }
+      function saveName() {
+        var next = cleanTitle(input.value);
+        if (!next) {
+          say('A task needs a name. The old name was kept.');
+          input.value = task.title;
+          if (input.focus) input.focus();
+          return;
+        }
+        if (next === task.title) {
+          closeEditor();
+          if (editName.focus) editName.focus();
+          return;
+        }
+        update(task.id, function (entry, now) {
+          var out = {};
+          Object.keys(entry).forEach(function (k) { out[k] = entry[k]; });
+          out.title = next;
+          out.updatedAt = new Date(now).toISOString();
+          return out;
+        });
+        say('Name saved.');
+        var scope = document.querySelector('[data-task-page]:not([hidden])') || root;
+        var again = scope && scope.querySelector('[data-rename]');
+        if (again && again.focus) again.focus();
+      }
+      function cancelName() {
+        closeEditor();
+        if (editName.focus) editName.focus();
+      }
+      save.addEventListener('click', saveName);
+      cancel.addEventListener('click', cancelName);
+      input.addEventListener('keydown', function (e) {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter') { e.preventDefault(); saveName(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancelName(); }
+      });
+      actions.appendChild(save);
+      actions.appendChild(cancel);
+      nameBox.appendChild(input);
+      nameBox.appendChild(actions);
+      if (input.focus) input.focus();
+      if (input.select) input.select();
     });
-    remove.addEventListener('click', function () {
-      var tasks = read(activeKey()).filter(function (entry) { return entry.id !== task.id; });
-      persist(tasks);
-      item.parentNode.removeChild(item);
-      var list = root.querySelector('[data-task-list]');
-      var empty = root.querySelector('[data-task-empty]');
-      if (empty) empty.hidden = !!(list && list.children.length);
-      refreshMoveButtons();
-    });
+    nameBox.appendChild(title);
+    nameBox.appendChild(editName);
+    return nameBox;
+  }
 
-    top.appendChild(dragHandle(item, task));
-    top.appendChild(label);
-    top.appendChild(title);
-    top.appendChild(remove);
-    item.appendChild(top);
-    item.appendChild(metaTags(task));
-
+  function actionButtons(task, withMove) {
+    var st = T.status(task);
     var actions = el('div', 'task-actions');
     if (!task.done) {
       if (st === 'running') {
@@ -541,9 +789,194 @@
       doneBtn.addEventListener('click', function () { update(task.id, function (e, now) { return T.complete(e, now); }); });
       actions.appendChild(doneBtn);
     }
-    actions.appendChild(moveButtons(task));
-    item.appendChild(actions);
+    if (withMove) actions.appendChild(moveButtons(task));
+    return actions;
+  }
+
+  function planFields(task) {
+    var plan = el('fieldset', 'task-fieldset');
+    plan.appendChild(el('legend', '', 'Plan'));
+    var startIn = dateInput(task.startAt);
+    var dueIn = dateInput(task.dueAt);
+    var dur = durationInputs(task.durationMin);
+    plan.appendChild(field('Scheduled start', startIn));
+    plan.appendChild(field('Due', dueIn));
+    var durWrap = el('div', 'task-field');
+    durWrap.appendChild(el('span', '', 'Projected duration'));
+    durWrap.appendChild(dur.node);
+    plan.appendChild(durWrap);
+    var savePlan = el('button', 'mini', 'Save plan');
+    savePlan.type = 'button';
+    savePlan.setAttribute('data-save-plan', 'true');
+    savePlan.addEventListener('click', function () {
+      update(task.id, function (entry, now) {
+        return T.setPlan(entry, { startAt: T.fromLocalInput(startIn.value), dueAt: T.fromLocalInput(dueIn.value), durationMin: dur.value() }, now);
+      });
+      say('Plan saved.');
+    });
+    plan.appendChild(savePlan);
+    return plan;
+  }
+
+  function actualFields(task) {
+    var actual = el('fieldset', 'task-fieldset');
+    actual.appendChild(el('legend', '', 'Actual'));
+    var aStart = dateInput(T.actualStart(task));
+    var aEnd = dateInput(T.actualEnd(task));
+    actual.appendChild(field('Actual start', aStart));
+    actual.appendChild(field('Actual end', aEnd));
+    if ((task.segments || []).length > 1) {
+      actual.appendChild(el('p', 'note', 'Changing these moves the first start and the last end. Sessions in between are kept.'));
+    }
+    var saveActual = el('button', 'mini', 'Save actual times');
+    saveActual.type = 'button';
+    saveActual.setAttribute('data-save-actual', 'true');
+    saveActual.addEventListener('click', function () {
+      try {
+        update(task.id, function (entry, now) {
+          return T.setActual(entry, T.fromLocalInput(aStart.value), T.fromLocalInput(aEnd.value), now);
+        });
+        say('Actual times saved.');
+      } catch (err) { say(err.message); }
+    });
+    actual.appendChild(saveActual);
+    return actual;
+  }
+
+  function statsPanel(task) {
+    var stats = el('section', 'task-stats');
+    stats.setAttribute('data-task-stats', 'true');
+    stats.appendChild(backButton());
+    var body = el('div', 'task-stats-body');
+    var name = el('h1', 'task-stats-name', task.title);
+    name.setAttribute('data-stat', 'name');
+    body.appendChild(name);
+
+    var statusRow = el('div', 'task-stat-row');
+    statusRow.appendChild(el('span', 'task-stat-label', 'Status'));
+    var statusVal = el('span', 'task-stat-value task-stat-status');
+    statusVal.setAttribute('data-stat', 'status');
+    statusVal.appendChild(document.createTextNode(statusLabel(task)));
+    if (T.incomplete(task)) statusVal.appendChild(tag('Incomplete', 'incomplete'));
+    if (T.status(task) === 'running') statusVal.appendChild(tag('Running', 'running'));
+    if (T.status(task) === 'done') statusVal.appendChild(tag('Completed', 'actual'));
+    if (T.overdue(task, Date.now())) statusVal.appendChild(tag('Overdue', 'late'));
+    statusRow.appendChild(statusVal);
+    body.appendChild(statusRow);
+
+    body.appendChild(statRow('Scheduled start', localWhen(task.startAt), 'start'));
+    body.appendChild(statRow('Due', localWhen(task.dueAt), 'due'));
+    body.appendChild(statRow('Projected duration', task.durationMin ? T.formatDuration(task.durationMin) : '\u2014', 'planned'));
+    body.appendChild(statRow('Actual start', localWhen(T.actualStart(task)), 'actual-start'));
+    body.appendChild(statRow('Actual end', localWhen(T.actualEnd(task)), 'actual-end'));
+    var running = T.status(task) === 'running';
+    var hasWork = task.segments && task.segments.length;
+    var durLabel = running ? 'Elapsed duration' : 'Actual duration';
+    var durValue = hasWork ? T.formatDuration(T.actualMinutes(task, Date.now())) : '\u2014';
+    body.appendChild(statRow(durLabel, durValue, 'actual-duration'));
+    var commentsRow = statRow('Comments', '\u2014', 'comments');
+    fillCommentCount(commentsRow.querySelector('[data-stat=comments]'), task);
+    body.appendChild(commentsRow);
+    stats.appendChild(body);
+
+    var hint = el('button', 'task-stats-hint');
+    hint.type = 'button';
+    hint.setAttribute('data-settings-hint', 'true');
+    hint.appendChild(el('span', '', 'Swipe for settings'));
+    hint.appendChild(el('span', 'task-stats-chevron', '\u2304'));
+    hint.setAttribute('aria-label', 'Swipe for settings');
+    hint.addEventListener('click', function () {
+      var settings = stats.parentNode && stats.parentNode.querySelector('[data-task-settings]');
+      if (settings && settings.scrollIntoView) settings.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    stats.appendChild(hint);
+    return stats;
+  }
+
+  function settingsPanel(task) {
+    var settings = el('section', 'task-settings');
+    settings.setAttribute('data-task-settings', 'true');
+    settings.appendChild(el('h2', '', 'Settings'));
+    var nameBox = el('fieldset', 'task-fieldset');
+    nameBox.appendChild(el('legend', '', 'Name'));
+    nameBox.appendChild(nameEditor(task));
+    settings.appendChild(nameBox);
+    settings.appendChild(actionButtons(task, false));
+    settings.appendChild(planFields(task));
+    settings.appendChild(actualFields(task));
+    var comments = el('section', 'task-page-comments');
+    comments.appendChild(el('h3', '', 'Comments'));
+    var slot = el('div', 'comments-slot');
+    slot.setAttribute('data-comments-for', task.id);
+    comments.appendChild(slot);
+    if (global.TWGITaskComments) {
+      global.TWGITaskComments.mountTask(slot, { taskId: task.id, title: task.title, ownerId: activeKey() });
+    } else {
+      slot.appendChild(el('p', 'note', 'Sign in to see and write comments.'));
+    }
+    settings.appendChild(comments);
+    var status = el('p', 'note');
+    status.setAttribute('data-task-page-status', 'true');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    settings.appendChild(status);
+    return settings;
+  }
+
+  function buildTaskPage(task) {
+    var wrap = el('div', 'task-page-inner');
+    wrap.setAttribute('data-id', task.id);
+    wrap.appendChild(statsPanel(task));
+    wrap.appendChild(settingsPanel(task));
+    return wrap;
+  }
+
+  function row(task, options) {
+    options = options || {};
+    var st = T.status(task);
+    var item = document.createElement('li');
+    item.className = 'task-row' + (st === 'stopped' ? ' is-incomplete' : '');
+    item.setAttribute('data-id', task.id);
+
+    var top = el('div', 'task-top');
+    var label = document.createElement('label');
+    label.className = 'task-check';
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = task.done;
+    var caption = document.createElement('span');
+    caption.className = 'visually-hidden';
+    caption.textContent = 'Done: ' + task.title;
+    label.appendChild(box);
+    label.appendChild(caption);
+
+    var nameBox = nameEditor(task);
+
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'task-delete';
+    remove.textContent = 'Delete';
+    remove.setAttribute('aria-label', 'Delete ' + task.title);
+
+    box.addEventListener('change', function () {
+      update(task.id, function (entry, now) { return box.checked ? T.complete(entry, now) : T.reopen(entry, now); });
+    });
+    remove.addEventListener('click', function () { removeTask(task.id); });
+
+    top.appendChild(dragHandle(item, task));
+    top.appendChild(label);
+    top.appendChild(nameBox);
+    top.appendChild(remove);
+    item.appendChild(top);
+    item.appendChild(metaTags(task));
+
+    item.appendChild(actionButtons(task, true));
     item.appendChild(detailsPanel(task, options.open));
+    item.addEventListener('click', function (e) {
+      if (ignoreOpenClick) return;
+      if (isInteractive(e.target, item)) return;
+      goToTask(task.id);
+    });
     return item;
   }
 
@@ -683,6 +1116,8 @@
     ensure();
     if (userId) adoptDeviceList(userId);
     renderList();
+    bindHash();
+    if (idFromHash(global.location.hash)) onHashChange();
     sync.pull(userId).then(function (remote) {
       if (!Array.isArray(remote) || !root) return;
       write(activeKey(), remote);
@@ -701,6 +1136,7 @@
     if (!root) return;
     if (userId) adoptDeviceList(userId);
     renderList();
+    if (idFromHash(global.location.hash)) onHashChange();
     say(userId
       ? 'Showing the list for this account on this device.'
       : 'Showing the list kept on this device.');

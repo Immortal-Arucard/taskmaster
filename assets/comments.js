@@ -247,9 +247,22 @@
     me = { id: state && state.user ? state.user.id : '', email: state && state.email ? String(state.email).toLowerCase() : '' };
   }
 
+  // Comment count for the task stats display. Resolves to a number, or
+  // null when comments are not switched on or cannot be read.
+  function countFor(ownerId, taskId) {
+    if (!client() || !ownerId || !taskId) return Promise.resolve(null);
+    return (async function () {
+      try {
+        var rows = must(await client().from('taskmaster_comments').select('id').eq('owner_id', ownerId).eq('task_id', taskId));
+        return rows ? rows.length : 0;
+      } catch (err) { return null; }
+    })();
+  }
+
   global.TWGITaskComments = {
     mountTask: mountTask, mountShared: mountShared, mountListSharing: mountListSharing,
-    syncThreads: syncThreads, setMe: setMe, me: function () { return me; }
+    syncThreads: syncThreads, setMe: setMe, me: function () { return me; },
+    countFor: countFor
   };
 
   function boot() {
