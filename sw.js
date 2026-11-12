@@ -1,5 +1,5 @@
 /* Taskmaster service worker. Bump CACHE on every release. */
-const CACHE = 'taskmaster-v5';
+const CACHE = 'taskmaster-v6';
 const APP_TITLE = 'Taskmaster';
 const ASSETS = [
   '/',
@@ -19,6 +19,9 @@ const ASSETS = [
   '/assets/push-core.js',
   '/assets/push-ui.js',
   '/assets/comments.js',
+  '/assets/cloud-sync.js',
+  '/assets/task-sync.js',
+  '/assets/auto-update.js',
   '/vendor/supabase.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

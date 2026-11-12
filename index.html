@@ -29,10 +29,11 @@
   <p class="eyebrow">TWGI master account</p>
   <h1>Taskmaster</h1>
   <p class="lead">Your personal task list. Plan a start, due time and duration, track the time you actually spend, and get reminders.</p>
-  <p class="note" id="who-note">Not signed in: this list is kept on this device. <a href="/login/">Sign in</a> with your TWGI master account to keep a list for your account.</p>
+  <p class="note" id="who-note">Not signed in: this list is kept on this device. <a href="/login/">Sign in</a> with your TWGI master account to sync your list across your devices.</p>
+  <p class="note sync-note" id="sync-note" role="status" aria-live="polite" hidden></p>
   <div class="flag" id="import-slot" role="region" aria-label="Import tasks" hidden></div>
   <div id="taskmaster-app" class="taskmaster"></div>
-  <p class="note">Tasks are saved on this device and work offline. Syncing between devices is coming later. When notifications are on, only each task’s name and times are sent to the reminder service.</p>
+  <p class="note">Tasks are saved on this device and work offline. When you are signed in, they also sync to your TWGI master account, so the same list, order, names, times and tracking show up on every device where you sign in. Changes made offline sync when you are back online. When notifications are on, only each task’s name and times are sent to the reminder service.</p>
   <section class="panel" id="shared-with-me" aria-label="Shared with me" hidden></section>
   <section class="panel" id="list-sharing-wrap" aria-labelledby="list-sharing-h">
     <h2 id="list-sharing-h">Comment access</h2>
@@ -54,9 +55,12 @@
 <script src="/assets/task-time.js"></script>
 <script src="/assets/task-order.js"></script>
 <script src="/assets/taskmaster.js"></script>
+<script src="/assets/auto-update.js"></script>
 <script src="/assets/app.js"></script>
 <script src="/vendor/supabase.js"></script>
 <script src="/assets/auth.js"></script>
+<script src="/assets/cloud-sync.js"></script>
+<script src="/assets/task-sync.js"></script>
 <script src="/assets/push-core.js"></script>
 <script src="/assets/push-ui.js"></script>
 <script src="/assets/comments.js"></script>

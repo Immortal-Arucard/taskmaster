@@ -1,6 +1,10 @@
 /* Boots the Taskmaster app page. */
 (function () {
-  if ('serviceWorker' in navigator) {
+  // v6: registers the service worker and reloads once when a new version
+  // takes over (assets/auto-update.js), so the Home Screen app updates itself.
+  if (window.TWGIAutoUpdate) {
+    window.TWGIAutoUpdate.start({ window: window, storage: window.sessionStorage, busySelector: '[data-rename-input]' });
+  } else if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/sw.js').catch(function () {});
     });
@@ -34,7 +38,7 @@
       if (note) {
         note.textContent = '';
         if (user) {
-          note.appendChild(document.createTextNode('Signed in as ' + (state.email || state.name) + '. This is your account\u2019s list on this device. '));
+          note.appendChild(document.createTextNode('Signed in as ' + (state.email || state.name) + '. Your list syncs across every device where you sign in. '));
           var out = document.createElement('a');
           out.href = '#';
           out.textContent = 'Sign out';
@@ -49,7 +53,7 @@
           link.href = '/login/';
           link.textContent = 'Sign in';
           note.appendChild(link);
-          note.appendChild(document.createTextNode(' with your TWGI master account to keep a list for your account.'));
+          note.appendChild(document.createTextNode(' with your TWGI master account to sync your list across your devices.'));
         }
       }
       offerImport();

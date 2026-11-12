@@ -43,6 +43,16 @@
     if (!userId || !Push.isOn(APP, userId) || !global.TWGITaskmaster) return Promise.resolve(false);
     var showTitles = !settings || !settings.prefs || settings.prefs.showTitles !== false;
     var tasks = global.TWGITaskmaster.read(userId).map(function (t) { return T.scheduleOf(t, showTitles); });
+    // v6: tasks deleted on any device are sent as finished, so an older copy
+    // saved by another device cannot keep reminding. The service takes 200.
+    var have = {};
+    tasks.forEach(function (t) { have[t.id] = true; });
+    var gone = global.TWGITaskmaster.tombstones ? global.TWGITaskmaster.tombstones(userId) : [];
+    gone.forEach(function (g) {
+      if (tasks.length >= 200 || have[g.id]) return;
+      tasks.push({ id: g.id, title: '', done: true, startAt: null, dueAt: null, durationMin: null, actualStartAt: null, actualEndAt: null, updatedAt: g.deletedAt });
+    });
+    if (tasks.length > 200) tasks = tasks.slice(0, 200);
     return Push.sendTasks(tasks).then(function () { pendingSync = false; return true; })
       .catch(function () { pendingSync = true; return false; });
   }

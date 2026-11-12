@@ -1,13 +1,20 @@
 /* Taskmaster list for a master account.
-   Storage is localStorage. Nothing in this file calls Supabase.
+   The device copy lives in localStorage. Nothing in this file calls
+   Supabase directly.
 
-   Sync-later seam: TWGITaskmaster.sync.pull and .push.
-   pull(userId) should resolve to an array of tasks, or null when the
-   remote store has nothing to apply. push(userId, tasks) should resolve
-   to { synced: true } after a reviewed table is applied. Until then both
-   stay local-only. A future table would be owner-scoped
-   (id, owner, title, done, created_at, updated_at) with row level
-   security limited to auth.uid(). Do not add that call here early.
+   Cloud sync (v6, assets/task-sync.js + assets/cloud-sync.js): when signed in,
+   assets/task-sync.js fills the seam below and the list syncs to the owner-only
+   tables taskmaster_tasks (one row per task) and taskmaster_lists (the order).
+     sync.stamp(userId, prev, next, info) runs inside every save. It returns
+       the list to store, with a fresh updatedAt on each changed task, and
+       records deletions (info.deleted) as tombstones.
+     sync.push(userId, tasks) resolves to { synced, pending, status } after
+       the next upload attempt.
+     sync.tombstones(userId) lists deleted task ids (push-ui sends them as
+       finished so other devices' old copies stop reminding).
+     TWGITaskmaster.applyRemote(userId, tasks) stores a merged list from the
+       cloud without re-stamping it and repaints (later, if you are typing).
+   Signed out, the seam stays local-only and the list is device-only.
 
    Schedule and timing fields (assets/task-time.js): startAt, dueAt,
    durationMin, segments [{s, e}], completedAt. Start / Stop (not finished) /
@@ -63,9 +70,11 @@
 
   var sync = {
     mode: 'local',
-    pull: function () { return Promise.resolve(null); },
+    stamp: function (id, prev, next) { return next; },
+    tombstones: function () { return []; },
     push: function () { return Promise.resolve({ synced: false, reason: 'local-only' }); }
   };
+  var renderLater = false;
 
   function storageKey(id) {
     return PREFIX + (id || DEVICE);
@@ -138,11 +147,15 @@
     if (pageStatus) pageStatus.textContent = text || '';
   }
 
-  function persist(tasks) {
+  function persist(tasks, info) {
     var id = activeKey();
     if (requireUser && !id) return Promise.resolve();
     if (O) tasks = O.normalize(tasks);
     try {
+      if (id && sync.stamp) {
+        var stamped = sync.stamp(id, read(id), tasks, info || {});
+        if (Array.isArray(stamped)) tasks = stamped;
+      }
       write(id, tasks);
     } catch (err) {
       say('This device could not store the list.');
@@ -150,11 +163,63 @@
     }
     changeListeners.forEach(function (fn) { try { fn(id, tasks); } catch (err) {} });
     return sync.push(id, tasks).then(function (result) {
-      if (result && result.synced) say('Synced.');
-      else say('Saved on this device. Sync later: this list is not sent to the account store.');
+      if (result && result.synced) say('Saved and synced.');
+      else if (result && result.message) say(result.message);
+      else say('Saved on this device.');
     }).catch(function () {
-      say('Saved on this device. Sync later: this list is not sent to the account store.');
+      say('Saved on this device.');
     });
+  }
+
+  // True while someone is typing in the list or the task page.
+  function editing() {
+    var a = document.activeElement;
+    var page = pageNode();
+    var inside = a && ((root && root.contains(a)) || (page && page.contains(a)));
+    if (inside && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName || '')) return true;
+    return !!document.querySelector('[data-rename-input]') || !!(root && root.querySelector('.is-sorting'));
+  }
+
+  // Repaints the list and keeps open "Times and comments" panels open.
+  function renderKeepingOpen() {
+    var open = {};
+    if (root) Array.prototype.forEach.call(root.querySelectorAll('details.task-details'), function (d) {
+      var item = d.closest('[data-id]');
+      if (d.open && item) open[item.getAttribute('data-id')] = true;
+    });
+    renderList();
+    if (root) Object.keys(open).forEach(function (id) {
+      var d = root.querySelector('[data-id="' + cssId(id) + '"] details.task-details');
+      if (d) d.open = true;
+    });
+    refreshOpenPage(null);
+  }
+
+  function repaintWhenFree() {
+    if (!root) return;
+    if (editing()) {
+      if (renderLater) return;
+      renderLater = true;
+      var retry = function () {
+        if (!renderLater) return;
+        if (editing()) { setTimeout(retry, 1000); return; }
+        renderLater = false;
+        renderKeepingOpen();
+      };
+      setTimeout(retry, 1000);
+      return;
+    }
+    renderKeepingOpen();
+  }
+
+  // A merged list from the cloud: stored as is (no new timestamps) and shown.
+  function applyRemote(id, tasks) {
+    if (!id || id !== activeKey() || !Array.isArray(tasks)) return false;
+    var list = O ? O.normalize(tasks) : tasks;
+    try { write(id, list); } catch (err) { return false; }
+    changeListeners.forEach(function (fn) { try { fn(id, list); } catch (err) {} });
+    repaintWhenFree();
+    return true;
   }
 
   function clear(node) {
@@ -631,7 +696,7 @@
 
   function removeTask(id) {
     var tasks = read(activeKey()).filter(function (entry) { return entry.id !== id; });
-    persist(tasks);
+    persist(tasks, { deleted: [id] });
     var list = root && root.querySelector('[data-task-list]');
     var item = list && list.querySelector('[data-id="' + cssId(id) + '"]');
     if (item && item.parentNode) item.parentNode.removeChild(item);
@@ -1118,12 +1183,6 @@
     renderList();
     bindHash();
     if (idFromHash(global.location.hash)) onHashChange();
-    sync.pull(userId).then(function (remote) {
-      if (!Array.isArray(remote) || !root) return;
-      write(activeKey(), remote);
-      renderList();
-      say('Loaded the synced list.');
-    }).catch(function () {});
   }
 
   function setUser(id) {
@@ -1138,7 +1197,7 @@
     renderList();
     if (idFromHash(global.location.hash)) onHashChange();
     say(userId
-      ? 'Showing the list for this account on this device.'
+      ? 'Showing your account\u2019s list.'
       : 'Showing the list kept on this device.');
   }
 
@@ -1167,7 +1226,10 @@
     onChange: function (fn) { changeListeners.push(fn); },
     openTask: openTask,
     moveBy: function (id, delta) { moveBy(id, delta, null); },
-    update: function (id, fn) { return update(id, fn); }
+    update: function (id, fn) { return update(id, fn); },
+    applyRemote: applyRemote,
+    tombstones: function (id) { try { return sync.tombstones(id) || []; } catch (err) { return []; } },
+    say: function (text) { say(text); }
   };
 
   function bootEmbedded() {
