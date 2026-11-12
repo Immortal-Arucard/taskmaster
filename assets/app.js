@@ -3,7 +3,7 @@
   // v6: registers the service worker and reloads once when a new version
   // takes over (assets/auto-update.js), so the Home Screen app updates itself.
   if (window.TWGIAutoUpdate) {
-    window.TWGIAutoUpdate.start({ window: window, storage: window.sessionStorage, busySelector: '[data-rename-input]' });
+    window.TWGIAutoUpdate.start({ window: window, storage: window.sessionStorage, busySelector: '[data-rename-input], .task-mic[aria-pressed="true"]' });
   } else if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/sw.js').catch(function () {});

@@ -41,6 +41,16 @@
    Taps on buttons, inputs, the drag handle, links or comments, and a drag to
    reorder, do not open the page.
 
+   Add-a-task microphone (v7): a small mic button sits inside the right edge of
+   the "Add a task" field. It uses the browser's Web Speech API only after a
+   tap (processLocally stays false; language is a full tag, default en-US,
+   with a retry if the first tag is rejected). The first utterance is trimmed,
+   a trailing period is dropped, and it replaces an empty field or is appended
+   with a space. It stops after that utterance, after about 8 s of silence, or
+   on a second tap. If speech recognition is not available, the tap focuses
+   the field so the keyboard microphone can be used. Errors are shown on the
+   existing status line. The microphone is never opened except from that tap.
+
    Change listeners: TWGITaskmaster.onChange(fn) gets (userId, tasks) after
    every save. assets/push-ui.js uses it to send the schedule fields to the
    push service, and assets/comments.js to keep comment threads titled.
@@ -1066,6 +1076,234 @@
     }
   }
 
+
+  /* ----- v7: dictate a new task name ----- */
+  var Recognition = global.SpeechRecognition || global.webkitSpeechRecognition || null;
+  var nav = global.navigator || {};
+  var ua = String(nav.userAgent || '');
+  var isApple = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (nav.maxTouchPoints || 0) > 1);
+  var isAndroid = /Android/i.test(ua);
+  var cfg = global.TWGITaskmasterConfig || {};
+  var SILENCE_MS = cfg.silenceMs || 8000;
+  var ADD_PLACEHOLDER = 'Add a task';
+  var KEYBOARD_TIP = 'You can also type the task, or tap the field and use the microphone key on your keyboard (on Android, the mic on Gboard).';
+  var LANG_RE = /^([A-Za-z]{2,3})(?:-([A-Za-z]{4}))?(?:-([A-Za-z]{2}|[0-9]{3}))?$/;
+  var REGION_FOR = { en: 'en-US', es: 'es-US', fr: 'fr-FR', de: 'de-DE', pt: 'pt-BR', it: 'it-IT', hi: 'hi-IN', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ar: 'ar-SA', ru: 'ru-RU', nl: 'nl-NL' };
+  function fullTag(v) {
+    var m = LANG_RE.exec(String(v || '').trim().replace(/_/g, '-'));
+    if (!m) return '';
+    var lang = m[1].toLowerCase();
+    if (lang === 'und' || lang === 'mul' || lang === 'zxx') return '';
+    if (!m[3]) return REGION_FOR[lang] || '';
+    return lang + (m[2] ? '-' + m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase() : '') + '-' + m[3].toUpperCase();
+  }
+  function deviceLang() {
+    var list = [].concat(nav.languages || [], nav.language || []);
+    for (var i = 0; i < list.length; i++) { var t = fullTag(list[i]); if (t) return t; }
+    return 'en-US';
+  }
+  function langChain() {
+    var first = deviceLang() || 'en-US';
+    var chain = [first];
+    if (first !== 'en-US') chain.push('en-US');
+    chain.push('');
+    return chain;
+  }
+  function langName(l) { return l ? l : 'browser default'; }
+  function joinPieces(list) {
+    var acc = '';
+    for (var i = 0; i < list.length; i++) {
+      var p = String(list[i] || '').replace(/\s+/g, ' ').trim();
+      if (!p) continue;
+      var a = acc.toLowerCase(), b = p.toLowerCase();
+      if (!acc) acc = p;
+      else if (b.indexOf(a) === 0) acc = p;
+      else if (a.slice(-b.length) === b) continue;
+      else acc += ' ' + p;
+    }
+    return acc;
+  }
+  function errorMessage(code) {
+    if (code === 'not-allowed') return 'Speech-to-text was not allowed. When Taskmaster asks, allow the microphone' + (isAndroid ? ' (or in Chrome: the lock icon / site settings, Microphone, Allow). ' : ' and speech recognition. ') + KEYBOARD_TIP;
+    if (code === 'service-not-allowed') return isApple
+      ? 'Your iPhone did not let Taskmaster use speech-to-text. Check that Dictation is on (Settings, General, Keyboard, Enable Dictation). ' + KEYBOARD_TIP
+      : isAndroid
+        ? 'Your phone did not let Taskmaster use speech-to-text. Check that Chrome may use the microphone and that the Google app’s speech service is on. ' + KEYBOARD_TIP
+        : 'This browser did not allow speech-to-text here. ' + KEYBOARD_TIP;
+    if (code === 'audio-capture') return 'Speech-to-text could not get the microphone (another app may be using it). ' + KEYBOARD_TIP;
+    if (code === 'language-not-supported') return 'Speech-to-text on this device would not accept the language (tried ' + langsTried() + '). ' + KEYBOARD_TIP;
+    if (code === 'network') return 'Speech-to-text needs an internet connection right now. ' + KEYBOARD_TIP;
+    if (code === 'start-failed') return 'Speech-to-text would not start. ' + KEYBOARD_TIP;
+    return 'Speech-to-text stopped (' + code + '). ' + KEYBOARD_TIP;
+  }
+
+  var taskMic = {
+    input: null, btn: null, wrap: null,
+    listening: false, rec: null, gen: 0, watch: null,
+    base: '', interim: '', finalText: '', fatal: '',
+    langs: ['en-US'], langStep: 0
+  };
+  function langsTried() { return taskMic.langs.slice(0, taskMic.langStep + 1).map(langName).join(', then '); }
+  function cleanUtterance(s) {
+    return String(s || '').replace(/\s+/g, ' ').trim().replace(/[.。]\s*$/, '');
+  }
+  function setInputValue(s) {
+    if (!taskMic.input) return;
+    taskMic.input.value = String(s || '').slice(0, MAX_TITLE);
+  }
+  function commitMic() {
+    var piece = cleanUtterance(taskMic.finalText || taskMic.interim);
+    if (piece) setInputValue(taskMic.base ? taskMic.base + ' ' + piece : piece);
+    else setInputValue(taskMic.base);
+    if (taskMic.input) taskMic.input.placeholder = ADD_PLACEHOLDER;
+  }
+  function paintHearing() {
+    var input = taskMic.input;
+    if (!input) return;
+    if (taskMic.finalText) {
+      var preview = String(taskMic.finalText).replace(/\s+/g, ' ').trim();
+      setInputValue(taskMic.base ? taskMic.base + ' ' + preview : preview);
+      input.placeholder = ADD_PLACEHOLDER;
+    } else if (taskMic.interim) {
+      if (taskMic.base) {
+        setInputValue(taskMic.base + ' ' + taskMic.interim);
+        input.placeholder = ADD_PLACEHOLDER;
+      } else {
+        setInputValue('');
+        input.placeholder = taskMic.interim;
+      }
+    } else {
+      setInputValue(taskMic.base);
+      input.placeholder = ADD_PLACEHOLDER;
+    }
+  }
+  function armSilence() {
+    clearTimeout(taskMic.watch);
+    taskMic.watch = setTimeout(onSilence, SILENCE_MS);
+  }
+  function onSilence() {
+    taskMic.watch = null;
+    if (!taskMic.listening) return;
+    if (taskMic.finalText || taskMic.interim) stopMic();
+    else { taskMic.finalText = ''; taskMic.interim = ''; stopMic({ silent: true }); say('No words came through for the task.'); }
+  }
+  function setListening(on) {
+    taskMic.listening = on;
+    if (taskMic.btn) {
+      taskMic.btn.classList.toggle('is-listening', on);
+      taskMic.btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    if (taskMic.wrap) taskMic.wrap.classList.toggle('is-listening', on);
+    if (!on && taskMic.input) taskMic.input.placeholder = ADD_PLACEHOLDER;
+  }
+  function newRecognizer() {
+    var my = ++taskMic.gen;
+    var r = new Recognition();
+    var lang = taskMic.langs[taskMic.langStep] || '';
+    if (lang) r.lang = lang;
+    r.continuous = false;
+    r.interimResults = true;
+    try { if ('processLocally' in r) r.processLocally = false; } catch (err) {}
+    r.onresult = function (ev) {
+      if (my !== taskMic.gen || !taskMic.listening) return;
+      var finals = [], live = [];
+      for (var i = 0; i < ev.results.length; i++) {
+        var res = ev.results[i];
+        var t = res && res[0] ? res[0].transcript : '';
+        if (res.isFinal) finals.push(t); else live.push(t);
+      }
+      if (finals.length) {
+        taskMic.finalText = finals[0];
+        taskMic.interim = '';
+        paintHearing();
+        stopMic();
+        return;
+      }
+      taskMic.interim = joinPieces(live);
+      paintHearing();
+      if (taskMic.interim) armSilence();
+    };
+    r.onerror = function (ev) {
+      if (my !== taskMic.gen || !taskMic.listening) return;
+      var code = (ev && ev.error) || 'unknown';
+      if (code === 'no-speech' || code === 'aborted') return;
+      if (code === 'language-not-supported' && !taskMic.finalText && !taskMic.interim && taskMic.langStep < taskMic.langs.length - 1) {
+        taskMic.langStep++;
+        taskMic.gen++;
+        try { r.abort(); } catch (err) {}
+        try { taskMic.rec = newRecognizer(); taskMic.rec.start(); return; }
+        catch (err) { taskMic.rec = null; }
+      }
+      taskMic.fatal = code;
+      try { r.abort(); } catch (err) {}
+      stopMic();
+    };
+    r.onend = function () {
+      if (my !== taskMic.gen) return;
+      if (!taskMic.listening) return;
+      if (taskMic.fatal) { stopMic(); return; }
+      if (taskMic.finalText || taskMic.interim) stopMic();
+    };
+    return r;
+  }
+  function startMic() {
+    if (requireUser && !userId) {
+      say('Log in on the master account to add a task.');
+      return;
+    }
+    if (!Recognition) {
+      try { if (taskMic.input) taskMic.input.focus(); } catch (err) {}
+      say('Tap the microphone key on your keyboard and speak the task, or type it.');
+      return;
+    }
+    taskMic.base = String(taskMic.input && taskMic.input.value || '').replace(/\s+/g, ' ').trim();
+    taskMic.interim = ''; taskMic.finalText = ''; taskMic.fatal = '';
+    taskMic.langs = langChain(); taskMic.langStep = 0;
+    try {
+      taskMic.rec = newRecognizer();
+      taskMic.rec.start();
+      setListening(true);
+      armSilence();
+    } catch (err) {
+      taskMic.rec = null;
+      setListening(false);
+      say(errorMessage('start-failed'));
+    }
+  }
+  function stopMic(opts) {
+    opts = opts || {};
+    if (!taskMic.listening && !taskMic.rec) return;
+    clearTimeout(taskMic.watch); taskMic.watch = null;
+    var r = taskMic.rec; taskMic.rec = null;
+    taskMic.gen++;
+    try { if (r) r.stop(); } catch (err) { try { if (r) r.abort(); } catch (e) {} }
+    var fatal = taskMic.fatal; taskMic.fatal = '';
+    setListening(false);
+    if (fatal && !taskMic.finalText && !taskMic.interim) {
+      setInputValue(taskMic.base);
+      if (!opts.silent) say(errorMessage(fatal));
+      taskMic.interim = ''; taskMic.finalText = '';
+      return;
+    }
+    if (!opts.silent) commitMic();
+    else { setInputValue(taskMic.base); if (taskMic.input) taskMic.input.placeholder = ADD_PLACEHOLDER; }
+    taskMic.interim = ''; taskMic.finalText = '';
+  }
+  function toggleMic() {
+    if (taskMic.listening) stopMic();
+    else startMic();
+  }
+  function bindTaskMic(input, btn, wrap) {
+    taskMic.input = input;
+    taskMic.btn = btn;
+    taskMic.wrap = wrap;
+    btn.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleMic();
+    });
+  }
+
   function ensure() {
     if (root.querySelector('[data-task-form]')) return;
     var form = document.createElement('form');
@@ -1094,8 +1332,20 @@
     add.type = 'submit';
     add.textContent = 'Add';
 
+    var wrap = document.createElement('div');
+    wrap.className = 'task-mic-wrap';
+    var mic = document.createElement('button');
+    mic.type = 'button';
+    mic.className = 'task-mic';
+    mic.setAttribute('aria-label', 'Dictate a task');
+    mic.setAttribute('aria-pressed', 'false');
+    mic.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>';
+    wrap.appendChild(input);
+    wrap.appendChild(mic);
+    bindTaskMic(input, mic, wrap);
+
     form.appendChild(label);
-    form.appendChild(input);
+    form.appendChild(wrap);
     form.appendChild(add);
 
     var whenBox = document.createElement('details');
@@ -1137,6 +1387,7 @@
         say('Log in on the master account to add a task.');
         return;
       }
+      if (taskMic.listening) stopMic();
       var title = cleanTitle(input.value);
       if (!title) {
         say('Write a task first.');
@@ -1229,7 +1480,17 @@
     update: function (id, fn) { return update(id, fn); },
     applyRemote: applyRemote,
     tombstones: function (id) { try { return sync.tombstones(id) || []; } catch (err) { return []; } },
-    say: function (text) { say(text); }
+    say: function (text) { say(text); },
+    _debug: {
+      listening: function () { return taskMic.listening; },
+      fullTag: fullTag,
+      deviceLang: deviceLang,
+      langChain: langChain,
+      langsTried: langsTried,
+      isApple: isApple,
+      isAndroid: isAndroid,
+      joinPieces: joinPieces
+    }
   };
 
   function bootEmbedded() {

@@ -39,7 +39,16 @@ body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-s
 .or{color:var(--mute);font-size:13px;letter-spacing:.12em;text-transform:uppercase;margin:4px 0}
 .taskmaster{margin-top:22px;min-width:0}
 .task-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;max-width:100%}
-.task-input{flex:1 1 12rem;min-width:0;min-height:48px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:#000;color:#fff;font:inherit;font-size:16px}
+.task-mic-wrap{position:relative;flex:1 1 12rem;min-width:0}
+.task-input{width:100%;min-width:0;min-height:48px;padding:0 14px;padding-right:52px;border-radius:12px;border:1px solid var(--line);background:#000;color:#fff;font:inherit;font-size:16px}
+.task-mic{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;min-width:40px;min-height:40px;margin:0;padding:0;border:0;border-radius:10px;background:transparent;color:var(--sky);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.task-mic svg{width:22px;height:22px;display:block}
+.task-mic:disabled{opacity:.4;cursor:not-allowed}
+.task-mic.is-listening,.task-mic[aria-pressed="true"]{color:#ff6b6b}
+.task-mic.is-listening svg{animation:task-mic-pulse 1s ease-in-out infinite}
+@keyframes task-mic-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.task-mic-wrap.is-listening .task-input{color:var(--mute);font-style:italic}
+.task-mic-wrap.is-listening .task-input::placeholder{color:var(--mute);font-style:italic;opacity:1}
 .task-add{margin-top:0}
 .task-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
 .task-row{display:flex;align-items:center;gap:8px;min-width:0}
