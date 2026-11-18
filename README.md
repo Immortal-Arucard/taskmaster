@@ -8,7 +8,7 @@ Standalone installable web app for Taskmaster, part of The World Government, Inc
 - Storage: `localStorage` keys `twgi-taskmaster-v1:<user id>` (signed in) and `twgi-taskmaster-v1:device` (signed out).
 - Cloud sync (v6, `assets/cloud-sync.js` + `assets/task-sync.js`, SQL `supabase/taskmaster_sync.sql`, NOT applied yet): signed in, every task (name, done, plan and actual times, worked sessions) syncs to the owner-only table `taskmaster_tasks`, and the manual order to `taskmaster_lists`. Newest change wins per task; the newest reorder wins for the order; tasks not in the synced order yet appear on top. Deleted tasks stay as tombstones so old copies never bring them back. The first sign-in merges the device list into the account (nothing is dropped). Offline changes queue in localStorage (`twgi-sync-v1:taskmaster:<user id>:*`) and sync on open, focus, back online, or a Supabase Realtime nudge. Signed out: device only, as before. Before the SQL is applied the app keeps working and says sync is not switched on yet. Deleted tasks are sent to the push service as finished so another device's older copy stops reminding.
 - One-time import: the main site's old `/taskmaster/` page redirects here with `#tm-import=<json>`; `assets/import.js` removes the fragment immediately and asks before merging by task id.
-- Offline: `sw.js` precaches the app shell. Bump `CACHE` (currently `taskmaster-v7`) on every release.
+- Offline: `sw.js` precaches the app shell. Bump `CACHE` (currently `taskmaster-v8`) on every release.
 - Auto-update (v6, `assets/auto-update.js`): registers `sw.js` with `updateViaCache: 'none'`, checks for a new version on open, when the app comes back to the screen, on focus and when back online (at most every 30 s), and reloads once when the new version takes over. No reload on first install, at most one automatic reload per 30 s (sessionStorage guard), and never while typing or renaming: it shows "Update ready" with a Reload button instead.
 - Task times (`assets/task-time.js`): scheduled start, due, projected duration; Start / Stop (not finished) / Resume / Finish record worked sessions (`segments`). Actual duration = sum of sessions, shown as a tag (e.g. `Actual 1h 25m`), also on stopped tasks, which carry a red `Incomplete` tag until resumed or finished. Actual start/end can also be typed in.
 - Manual order (`assets/task-order.js`, v4): drag a task by its handle (touch, pen or mouse), use the arrow keys on the handle, or tap Up / Down. Each task stores `order` (0 = top) in the same localStorage list, and the array is saved in that order. Lists from before v4 keep their existing sequence. The order is not sent to the push service.
@@ -35,3 +35,26 @@ Never commit secrets, `wrangler.jsonc`, or Hyperdrive ids. Only the publishable 
   keyboard microphone can be used. Permission or start failures appear on the
   existing status line.
 - Cache `taskmaster-v7`. No SQL, no Worker change.
+
+## v8 — Alert: red, yellow or green on any task
+- Each task can carry an alert colour: `red`, `yellow`, `green`, or none (the default;
+  every task made before v8 has none and is never rewritten just by opening it).
+- Add a task: an Alert picker (None / Red / Yellow / Green, 44px tap targets)
+  sits under the Add field and resets to None after each add.
+- Task cards: a coloured left edge and a solid "red alert / yellow alert / green alert" tag (all lowercase)
+  (word + colour, so it does not rely on colour alone). No alert colour = no marker.
+- Full-page task view: an Alert row in the stats (marker, or a dash) and an
+  Alert picker in the Settings section; picking saves at once ("Alert set
+  to Red." / "Alert cleared.") and the card in the list updates too.
+- The word "Priority" is never shown to the user (tags, headings, stats label, status
+  messages, aria text); only the stored field keeps its internal name.
+- Storage: `priority` (internal name, unchanged) is a plain field of the task (`'red' | 'yellow' | 'green'`,
+  absent when none; junk values are ignored). It syncs inside the existing
+  `taskmaster_tasks.data` jsonb, so **no SQL and no Worker change**.
+  `assets/task-sync.js` adds `priority` to its field list. The push-service
+  schedule is unchanged (no alert colour is sent).
+- A focused Alert radio no longer holds back repaints from another device
+  (only typing in a text field does).
+- Mixed versions: a device still on v7 does not know `priority`; if it edits that
+  task it would sync the task without it. Auto-update replaces v7 on next open.
+- Cache `taskmaster-v8`.

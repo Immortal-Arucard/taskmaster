@@ -2,7 +2,8 @@
    assets/task-order.js and assets/auth.js (TWGIAccount).
 
    Signed in: every task syncs to public.taskmaster_tasks (one owner-only row
-   per task: name, done, times, worked sessions; deleted tasks stay as
+   per task: name, done, times, worked sessions, priority (v8: red / yellow /
+   green, kept inside the same data object, so no SQL change); deleted tasks stay as
    tombstones) and the list order to public.taskmaster_lists. Newest change
    wins per task; the newest reorder wins for the order. Tasks that are not in
    the synced order yet (just added on another device) appear at the top.
@@ -14,7 +15,7 @@
   var O = global.TWGITaskOrder;
   if (!TM || !Sync) return;
 
-  var FIELDS = ['title', 'done', 'createdAt', 'startAt', 'dueAt', 'durationMin', 'segments', 'completedAt'];
+  var FIELDS = ['title', 'done', 'createdAt', 'startAt', 'dueAt', 'durationMin', 'segments', 'completedAt', 'priority'];
 
   function ids(list) { return (list || []).map(function (t) { return t.id; }); }
   function normalize(list) { return O ? O.normalize(list) : list.slice(); }

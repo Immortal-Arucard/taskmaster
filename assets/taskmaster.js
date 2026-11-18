@@ -108,6 +108,7 @@
           durationMin: task.durationMin,
           segments: task.segments,
           completedAt: task.completedAt,
+          priority: task.priority,
           order: task.order
         };
         return T ? T.clean(base) : base;
@@ -186,6 +187,8 @@
     var a = document.activeElement;
     var page = pageNode();
     var inside = a && ((root && root.contains(a)) || (page && page.contains(a)));
+    // v8: a focused priority radio is a tap, not typing, so it must not hold back repaints.
+    if (inside && a.tagName === 'INPUT' && a.type === 'radio') return false;
     if (inside && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName || '')) return true;
     return !!document.querySelector('[data-rename-input]') || !!(root && root.querySelector('.is-sorting'));
   }
@@ -251,6 +254,57 @@
     span.className = 'task-tag' + (kind ? ' tag-' + kind : '');
     span.textContent = text;
     return span;
+  }
+
+  /* ----- v8: priority (red / yellow / green, or none) ----- */
+  var PRIORITY_LABEL = { red: 'Red', yellow: 'Yellow', green: 'Green' };
+  var pickerCount = 0;
+
+  function priorityTag(task) {
+    var pri = T.cleanPriority(task.priority);
+    if (!pri) return null;
+    var node = tag(pri + ' alert', 'priority-' + pri);
+    node.setAttribute('data-priority-tag', pri);
+    return node;
+  }
+
+  // Four big radio pills: None, Red, Yellow, Green. onPick(value) fires on a
+  // change (value is 'red' | 'yellow' | 'green' | null). value() reads it.
+  function priorityPicker(current, onPick) {
+    pickerCount += 1;
+    var group = 'priority-' + pickerCount;
+    var box = el('div', 'priority-picker');
+    box.setAttribute('role', 'radiogroup');
+    box.setAttribute('aria-label', 'Alert');
+    box.setAttribute('data-priority-picker', 'true');
+    var now = T.cleanPriority(current) || '';
+    [['', 'None'], ['red', 'Red'], ['yellow', 'Yellow'], ['green', 'Green']].forEach(function (opt) {
+      var label = el('label', 'priority-opt' + (opt[0] ? ' priority-' + opt[0] : ' priority-none'));
+      var input = document.createElement('input');
+      input.type = 'radio';
+      input.name = group;
+      input.value = opt[0];
+      input.checked = opt[0] === now;
+      input.setAttribute('data-priority-option', opt[0] || 'none');
+      input.addEventListener('change', function () {
+        if (input.checked && onPick) onPick(opt[0] || null);
+      });
+      label.appendChild(input);
+      label.appendChild(el('span', 'priority-dot'));
+      label.appendChild(el('span', 'priority-name', opt[1]));
+      box.appendChild(label);
+    });
+    return {
+      node: box,
+      value: function () {
+        var checked = box.querySelector('input:checked');
+        return checked && checked.value ? checked.value : null;
+      },
+      reset: function () {
+        var none = box.querySelector('input[value=""]');
+        if (none) none.checked = true;
+      }
+    };
   }
 
   function el(name, cls, text) {
@@ -321,6 +375,8 @@
     var now = Date.now();
     var box = el('div', 'task-meta');
     var st = T.status(task);
+    var pri = priorityTag(task);
+    if (pri) box.appendChild(pri);
     if (task.startAt) box.appendChild(tag('Starts ' + when(task.startAt), 'plan'));
     if (task.dueAt) box.appendChild(tag('Due ' + when(task.dueAt), T.overdue(task, now) ? 'late' : 'plan'));
     if (task.durationMin) box.appendChild(tag('Planned ' + T.formatDuration(task.durationMin), 'plan'));
@@ -868,6 +924,21 @@
     return actions;
   }
 
+  function priorityFields(task) {
+    var box = el('fieldset', 'task-fieldset');
+    box.setAttribute('data-priority-fields', 'true');
+    box.appendChild(el('legend', '', 'Alert'));
+    var picker = priorityPicker(task.priority, function (value) {
+      update(task.id, function (entry, now) { return T.setPriority(entry, value, now); });
+      say(value ? 'Alert set to ' + PRIORITY_LABEL[value] + '.' : 'Alert cleared.');
+      var page = document.querySelector('[data-task-page]:not([hidden])');
+      var again = page && page.querySelector('[data-priority-option="' + (value || 'none') + '"]');
+      if (again && again.focus) again.focus();
+    });
+    box.appendChild(picker.node);
+    return box;
+  }
+
   function planFields(task) {
     var plan = el('fieldset', 'task-fieldset');
     plan.appendChild(el('legend', '', 'Plan'));
@@ -939,6 +1010,15 @@
     statusRow.appendChild(statusVal);
     body.appendChild(statusRow);
 
+    var priRow = el('div', 'task-stat-row');
+    priRow.appendChild(el('span', 'task-stat-label', 'Alert'));
+    var priVal = el('span', 'task-stat-value task-stat-priority');
+    priVal.setAttribute('data-stat', 'priority');
+    var priNode = priorityTag(task);
+    if (priNode) priVal.appendChild(priNode); else priVal.textContent = '\u2014';
+    priRow.appendChild(priVal);
+    body.appendChild(priRow);
+
     body.appendChild(statRow('Scheduled start', localWhen(task.startAt), 'start'));
     body.appendChild(statRow('Due', localWhen(task.dueAt), 'due'));
     body.appendChild(statRow('Projected duration', task.durationMin ? T.formatDuration(task.durationMin) : '\u2014', 'planned'));
@@ -977,6 +1057,7 @@
     nameBox.appendChild(nameEditor(task));
     settings.appendChild(nameBox);
     settings.appendChild(actionButtons(task, false));
+    settings.appendChild(priorityFields(task));
     settings.appendChild(planFields(task));
     settings.appendChild(actualFields(task));
     var comments = el('section', 'task-page-comments');
@@ -1010,7 +1091,9 @@
     options = options || {};
     var st = T.status(task);
     var item = document.createElement('li');
-    item.className = 'task-row' + (st === 'stopped' ? ' is-incomplete' : '');
+    var rowPri = T.cleanPriority(task.priority);
+    item.className = 'task-row' + (st === 'stopped' ? ' is-incomplete' : '') + (rowPri ? ' has-priority pri-' + rowPri : '');
+    if (rowPri) item.setAttribute('data-priority', rowPri);
     item.setAttribute('data-id', task.id);
 
     var top = el('div', 'task-top');
@@ -1366,6 +1449,12 @@
     whenBox.appendChild(newDurWrap);
     form.appendChild(whenBox);
 
+    var newPri = priorityPicker(null);
+    var priWrap = el('div', 'task-new-priority');
+    priWrap.appendChild(el('span', 'task-new-priority-label', 'Alert'));
+    priWrap.appendChild(newPri.node);
+    form.insertBefore(priWrap, whenBox);
+
     var empty = document.createElement('p');
     empty.className = 'note';
     empty.setAttribute('data-task-empty', 'true');
@@ -1403,6 +1492,9 @@
       var task = T.setPlan({ id: newId(), title: title, done: false, createdAt: now, updatedAt: now, segments: [] }, {
         startAt: T.fromLocalInput(newStart.value), dueAt: T.fromLocalInput(newDue.value), durationMin: newDur.value()
       }, Date.parse(now));
+      var chosen = newPri.value();
+      if (chosen) task = T.setPriority(task, chosen, Date.parse(now));
+      newPri.reset();
       newStart.value = '';
       newDue.value = '';
       Array.prototype.forEach.call(whenBox.querySelectorAll('input[type=number]'), function (n) { n.value = ''; });
