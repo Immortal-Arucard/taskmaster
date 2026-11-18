@@ -1,5 +1,5 @@
 /* Taskmaster service worker. Bump CACHE on every release. */
-const CACHE = 'taskmaster-v7';
+const CACHE = 'taskmaster-v8';
 const APP_TITLE = 'Taskmaster';
 const ASSETS = [
   '/',

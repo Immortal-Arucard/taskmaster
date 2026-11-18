@@ -8,6 +8,8 @@
      segments     worked time: [{ s: ISO, e: ISO|null }], oldest first.
                   An open segment (e null) means the task is running.
      completedAt  ISO when it was checked off, or null
+     priority     'red' | 'yellow' | 'green', or absent (no priority; every
+                  task made before v8 has none). Never stored as null or ''.
 
    Status:
      'todo'     nothing recorded
@@ -55,10 +57,20 @@
     return isFinite(n) && n > 0 && n <= 10080 ? n : null;
   }
 
+  var PRIORITIES = ['red', 'yellow', 'green'];
+
+  // 'red' | 'yellow' | 'green' (any case) -> that word; anything else -> null.
+  function cleanPriority(value) {
+    var v = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return PRIORITIES.indexOf(v) === -1 ? null : v;
+  }
+
   // Normalises the timing fields of a stored task (keeps other fields).
   function clean(task) {
     var out = {};
     Object.keys(task || {}).forEach(function (k) { out[k] = task[k]; });
+    var pri = cleanPriority(task && task.priority);
+    if (pri) out.priority = pri; else delete out.priority;
     out.startAt = iso(task && task.startAt);
     out.dueAt = iso(task && task.dueAt);
     out.durationMin = cleanDuration(task && task.durationMin);
@@ -155,6 +167,15 @@
     return touch(t, now);
   }
 
+  // Sets the priority ('red' | 'yellow' | 'green'); anything else clears it
+  // (the key is removed, so a task with no priority looks like an old task).
+  function setPriority(task, value, now) {
+    var t = clean(task);
+    var pri = cleanPriority(value);
+    if (pri) t.priority = pri; else delete t.priority;
+    return touch(t, now);
+  }
+
   function actualMinutes(task, now) {
     var total = 0;
     (task.segments || []).forEach(function (seg) {
@@ -229,6 +250,6 @@
     complete: complete, reopen: reopen, setActual: setActual, setPlan: setPlan,
     actualMinutes: actualMinutes, actualStart: actualStart, actualEnd: actualEnd,
     plannedEnd: plannedEnd, formatDuration: formatDuration, overdue: overdue,
-    scheduleOf: scheduleOf, toLocalInput: toLocalInput, fromLocalInput: fromLocalInput
+    scheduleOf: scheduleOf, setPriority: setPriority, cleanPriority: cleanPriority, PRIORITIES: PRIORITIES, toLocalInput: toLocalInput, fromLocalInput: fromLocalInput
   };
 });
